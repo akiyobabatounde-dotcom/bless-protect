@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vérifier un IMEI – Bless Protect</title>
+  <link rel="icon" href="shield.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="page">
+  <div class="panel">
+    <a class="brand" href="/">
+      <img src="shield.svg" alt="" width="34" height="34">
+      <div><b>Bless Protect</b><span>par Blessmax Digital</span></div>
+    </a>
+    <h1>Ce téléphone est-il volé&nbsp;?</h1>
+    <p class="lead">Avant d'acheter un téléphone d'occasion, demandez au vendeur de composer <b>*#06#</b> et saisissez le numéro IMEI affiché.</p>
+    <form id="form" novalidate>
+      <div class="field">
+        <label for="imei">Numéro IMEI (15 chiffres)</label>
+        <input id="imei" inputmode="numeric" autocomplete="off" maxlength="17" placeholder="356938035643809">
+      </div>
+      <button class="btn-gold btn-block" type="submit">Vérifier</button>
+      <p class="error" id="error" role="alert"></p>
+    </form>
+    <div class="result" id="result" role="status"><h3 id="r-title"></h3><p class="muted small" id="r-text" style="margin-top:6px"></p></div>
+    <div class="links">
+      <a href="/">Localiser mon téléphone</a>
+      <a href="vol">On m'a volé mon téléphone</a>
+    </div>
+  </div>
+</main>
+<script>
+const form = document.getElementById("form"), input = document.getElementById("imei");
+const err = document.getElementById("error"), result = document.getElementById("result");
+input.addEventListener("input", () => { err.textContent = ""; result.className = "result"; });
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const imei = input.value.replace(/\D/g, "");
+  if (imei.length !== 15) { err.textContent = "L'IMEI doit contenir exactement 15 chiffres."; return; }
+  const res = await fetch(`/api/imei/${imei}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { err.textContent = data.error || "Vérification impossible. Réessayez."; return; }
+  const titles = { stolen: "Déclaré volé", ok: "Enregistré, non déclaré volé", unknown: "Inconnu du registre" };
+  document.getElementById("r-title").textContent = titles[data.status];
+  document.getElementById("r-text").textContent = data.message;
+  result.className = `result show ${data.status}`;
+});
+</script>
+</body>
+</html>

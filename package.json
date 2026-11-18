@@ -1,0 +1,20 @@
+{
+  "name": "bless-protect-server",
+  "version": "1.0.0",
+  "description": "Serveur et site de suivi Bless Protect",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.2",
+    "leaflet": "^1.9.4"
+  }
+}

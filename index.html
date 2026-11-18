@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bless Protect – Localiser mon téléphone</title>
+  <link rel="icon" href="shield.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Connexion -->
+<main id="login" class="page" hidden>
+  <div class="panel">
+    <a class="brand" href="/">
+      <img src="shield.svg" alt="" width="34" height="34">
+      <div><b>Bless Protect</b><span>par Blessmax Digital</span></div>
+    </a>
+    <h1>Votre téléphone a disparu&nbsp;?</h1>
+    <p class="lead">Connectez-vous avec l'adresse e-mail choisie dans l'application pour le localiser, le faire sonner ou le verrouiller.</p>
+    <form id="login-form" novalidate>
+      <div class="field">
+        <label for="email">Adresse e-mail</label>
+        <input id="email" type="email" autocomplete="username" placeholder="nom@gmail.com" required>
+      </div>
+      <div class="field">
+        <label for="password">Mot de passe</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn-gold btn-block" type="submit">Se connecter</button>
+      <p class="error" id="login-error" role="alert"></p>
+    </form>
+    <div class="links">
+      <a href="verifier">Vérifier un téléphone d'occasion avant de l'acheter</a>
+      <a href="vol">On m'a volé mon téléphone et je n'avais pas l'application</a>
+    </div>
+  </div>
+</main>
+
+<!-- Tableau de bord -->
+<div id="app" class="app" hidden>
+  <aside class="side">
+    <div class="side-head">
+      <a class="brand" href="/">
+        <img src="shield.svg" alt="" width="30" height="30">
+        <div><b>Bless Protect</b></div>
+      </a>
+      <button class="linkish" id="logout" type="button">Se déconnecter</button>
+    </div>
+
+    <div class="device" id="device">
+      <p class="muted" id="no-device" hidden>Aucun téléphone n'est encore relié à ce compte. Installez l'application Bless Protect et créez votre compte depuis le téléphone.</p>
+
+      <div id="device-body" hidden>
+        <select id="device-select" class="device-select" aria-label="Téléphone" hidden></select>
+
+        <div class="status" id="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2 id="status-title">Protégé</h2>
+            <p class="muted small" id="status-sub"></p>
+          </div>
+        </div>
+
+        <dl class="facts" style="margin-top:20px">
+          <div class="fact"><dt>Téléphone</dt><dd id="f-name">–</dd></div>
+          <div class="fact"><dt>Batterie</dt><dd id="f-battery">–</dd></div>
+          <div class="fact"><dt>Dernier contact</dt><dd id="f-seen">–</dd></div>
+          <div class="fact"><dt>Carte SIM</dt><dd id="f-sim">–</dd></div>
+        </dl>
+
+        <div class="actions" style="margin-top:20px">
+          <button class="btn-red theft-cta" id="btn-theft" type="button">Déclarer le vol</button>
+          <div class="actions-row">
+            <button type="button" data-cmd="ALARM">Faire sonner</button>
+            <button type="button" data-cmd="LOCK">Verrouiller</button>
+          </div>
+          <div class="actions-row">
+            <button type="button" data-cmd="LOCATE">Localiser</button>
+            <a class="btn" id="btn-contacts" href="#">Mes contacts</a>
+          </div>
+          <p class="note" id="pending-note"></p>
+        </div>
+
+        <div id="evidence-block" style="margin-top:24px" hidden>
+          <h3 class="section-title">Photos du voleur</h3>
+          <p class="muted small" style="margin:-6px 0 10px">Prises automatiquement après un code erroné ou un changement de carte SIM.</p>
+          <div class="evidence-grid" id="evidence-grid"></div>
+        </div>
+
+        <div id="photos-block" style="margin-top:24px" hidden>
+          <h3 class="section-title">Mes photos sauvegardées</h3>
+          <p class="muted small" id="photos-sub" style="margin:-6px 0 10px"></p>
+          <div class="evidence-grid" id="photos-grid"></div>
+        </div>
+
+        <div style="margin-top:24px">
+          <h3 class="section-title">Activité</h3>
+          <ul class="timeline" id="timeline"></ul>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="map-wrap" aria-label="Carte de localisation">
+    <div id="map"></div>
+    <div class="map-empty" id="map-empty" hidden><p>Pas encore de position. Elle apparaîtra dès que le téléphone se connectera à internet.</p></div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let me = null, current = null, map = null, marker = null, trail = null, accuracyCircle = null, timer = null, firstFit = true;
+
+const COMMAND_LABELS = {
+  LOCATE: "Actualiser la position", ALARM: "Faire sonner", LOCK: "Verrouiller",
+  VOL: "Déclaration de vol", STOP: "Fin du mode vol",
+};
+const EVENT_LABELS = {
+  SIM: "Nouvelle carte SIM détectée", PIN: "Codes erronés sur l'écran de verrouillage",
+  POWER: "Tentative d'extinction bloquée", BOOT: "Téléphone redémarré", BATTERY: "Batterie faible",
+  THEFT_ON: "Mode vol activé", THEFT_OFF: "Mode vol désactivé", PHOTO: "Photo prise",
+};
+const EVIDENCE_EVENT = { PIN: "Code erroné", SIM: "Changement de SIM" };
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method, credentials: "same-origin",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || "Erreur réseau. Réessayez."), { status: res.status });
+  return data;
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+function ago(ms) {
+  if (!ms) return "jamais";
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 60) return "à l'instant";
+  const m = Math.round(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  return `il y a ${Math.round(h / 24)} j`;
+}
+const clock = (ms) => new Date(ms).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+// ---------- Connexion ----------
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("email").value.trim(), password = $("password").value;
+  $("login-error").textContent = "";
+  if (!email || !password) { $("login-error").textContent = "Entrez votre e-mail et votre mot de passe."; return; }
+  const btn = e.submitter; btn.disabled = true;
+  try { await api("POST", "/api/login", { email, password }); await start(); }
+  catch (err) { $("login-error").textContent = err.message; }
+  finally { btn.disabled = false; }
+});
+["email", "password"].forEach((id) => $(id).addEventListener("input", () => ($("login-error").textContent = "")));
+
+$("logout").addEventListener("click", async () => {
+  await api("POST", "/api/logout").catch(() => {});
+  location.reload();
+});
+
+// ---------- Tableau de bord ----------
+async function start() {
+  try { me = await api("GET", "/api/me"); }
+  catch (e) { $("login").hidden = false; $("app").hidden = true; return; }
+  $("login").hidden = true; $("app").hidden = false;
+  if (!map) initMap();
+  if (!me.devices.length) { $("no-device").hidden = false; $("device-body").hidden = true; return; }
+  $("no-device").hidden = true; $("device-body").hidden = false;
+
+  const sel = $("device-select");
+  sel.hidden = me.devices.length < 2;
+  sel.innerHTML = me.devices.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+  if (!current || !me.devices.find((d) => d.id === current)) current = me.devices[0].id;
+  sel.value = current;
+  await refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 15000);
+}
+
+$("device-select").addEventListener("change", (e) => { current = e.target.value; firstFit = true; refresh(); });
+
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+async function refresh() {
+  let h;
+  try { h = await api("GET", `/api/devices/${current}/history`); }
+  catch (e) { if (e.status === 401) location.reload(); return; }
+  const d = h.device;
+  const stale = !d.lastSeen || Date.now() - d.lastSeen > 30 * 60_000;
+
+  const status = $("status");
+  status.classList.toggle("theft", d.theft);
+  status.classList.toggle("stale", !d.theft && stale);
+  $("status-title").textContent = d.theft ? "Mode vol actif" : stale ? "Hors ligne" : "Protégé";
+  $("status-sub").textContent = d.theft
+    ? "Le téléphone envoie sa position toutes les minutes et il est signalé volé dans le registre IMEI."
+    : stale ? "Le téléphone ne s'est pas connecté depuis un moment. Sa dernière position reste affichée."
+    : "Le téléphone est surveillé. Rien d'anormal.";
+
+  $("f-name").textContent = d.name + (d.model ? ` (${d.model})` : "");
+  $("f-battery").textContent = d.battery == null ? "–" : `${d.battery} %`;
+  $("f-seen").textContent = ago(d.lastSeen);
+  $("f-sim").textContent = d.sim || "–";
+
+  const btn = $("btn-theft");
+  btn.textContent = d.theft ? "J'ai retrouvé mon téléphone" : "Déclarer le vol";
+  btn.className = d.theft ? "theft-cta" : "btn-red theft-cta";
+  btn.dataset.cmd = d.theft ? "STOP" : "VOL";
+
+  const contacts = $("btn-contacts");
+  if (d.hasContacts) {
+    contacts.href = `/api/devices/${d.id}/contacts.vcf`;
+    contacts.textContent = `Mes contacts (${d.contactsCount})`;
+    contacts.removeAttribute("aria-disabled");
+  } else {
+    contacts.href = "#";
+    contacts.textContent = "Aucun contact sauvegardé";
+    contacts.setAttribute("aria-disabled", "true");
+  }
+
+  $("pending-note").textContent = d.pendingCommands
+    ? `${d.pendingCommands} commande(s) en attente : le téléphone les recevra à sa prochaine connexion.`
+    : "";
+
+  renderEvidence(h.evidence || []);
+  renderPhotos(h.photos || []);
+  renderTimeline(h);
+  renderMap(d, h.locations);
+}
+
+function renderPhotos(list) {
+  const block = $("photos-block"), grid = $("photos-grid");
+  if (!list.length) { block.hidden = true; grid.innerHTML = ""; return; }
+  block.hidden = false;
+  $("photos-sub").textContent = `${list.length} photo(s) · cliquez pour télécharger`;
+  grid.innerHTML = list.map((p) => {
+    const view = `/api/devices/${current}/photos/${encodeURIComponent(p.id)}.jpg`;
+    return `<a class="evidence-item" href="${view}?dl=1" title="${escapeHtml(clock(p.taken))}">
+      <img src="${view}" alt="Photo du ${escapeHtml(clock(p.taken))}" loading="lazy">
+      <span class="evidence-cap">${escapeHtml(clock(p.taken))}</span>
+    </a>`;
+  }).join("");
+}
+
+function renderEvidence(list) {
+  const block = $("evidence-block"), grid = $("evidence-grid");
+  if (!list.length) { block.hidden = true; grid.innerHTML = ""; return; }
+  block.hidden = false;
+  grid.innerHTML = list.map((e) => {
+    const url = `/api/devices/${current}/evidence/${e.id}.jpg`;
+    const face = e.facing === "back" ? "Arrière" : "Avant";
+    const why = EVIDENCE_EVENT[e.event] || e.event || "";
+    return `<a class="evidence-item" href="${url}" target="_blank" rel="noopener" title="${escapeHtml(face + " · " + why + " · " + clock(e.time))}">
+      <img src="${url}" alt="Photo ${escapeHtml(face.toLowerCase())} — ${escapeHtml(why)}" loading="lazy">
+      <span class="evidence-cap">${escapeHtml(face)} · ${escapeHtml(clock(e.time))}</span>
+    </a>`;
+  }).join("");
+}
+
+function renderTimeline(h) {
+  const items = [
+    ...h.events.map((e) => ({ time: e.time, text: EVENT_LABELS[e.type] || e.type, detail: e.detail, alert: true })),
+    ...h.commands.map((c) => ({
+      time: c.createdAt,
+      text: COMMAND_LABELS[c.type] || c.type,
+      detail: c.doneAt ? "Exécutée par le téléphone" : c.deliveredAt ? "Reçue par le téléphone" : "En attente du téléphone",
+    })),
+  ].sort((a, b) => b.time - a.time).slice(0, 12);
+  $("timeline").innerHTML = items.length
+    ? items.map((i) => `<li class="${i.alert ? "alert" : ""}"><div>${escapeHtml(i.text)}${i.detail ? `<span class="muted small" style="display:block">${escapeHtml(i.detail)}</span>` : ""}<time>${clock(i.time)}</time></div></li>`).join("")
+    : `<li><div class="muted">Aucune activité pour le moment.</div></li>`;
+}
+
+function initMap() {
+  map = L.map("map", { zoomControl: true, attributionControl: true }).setView([6.45, 2.35], 11);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+}
+
+function renderMap(d, locations) {
+  setTimeout(() => map.invalidateSize(), 0);
+  $("map-empty").hidden = !!d.lastLocation;
+  if (!d.lastLocation) return;
+  const { lat, lng, accuracy } = d.lastLocation;
+  const icon = L.divIcon({ className: "", html: `<div class="phone-marker ${d.theft ? "theft" : ""}"><span class="core"></span></div>`, iconSize: [0, 0] });
+  if (!marker) marker = L.marker([lat, lng], { icon, keyboard: false }).addTo(map);
+  else { marker.setLatLng([lat, lng]); marker.setIcon(icon); }
+  marker.bindTooltip(`Position ${ago(d.lastLocation.time)}`, { direction: "top", offset: [0, -14] });
+
+  if (accuracyCircle) accuracyCircle.remove();
+  if (accuracy) accuracyCircle = L.circle([lat, lng], { radius: accuracy, color: "#d4af37", weight: 1, fillOpacity: 0.08 }).addTo(map);
+
+  const pts = locations.slice(-60).map((l) => [l.lat, l.lng]);
+  if (trail) trail.remove();
+  if (pts.length > 1) trail = L.polyline(pts, { color: d.theft ? "#e5484d" : "#d4af37", weight: 3, opacity: 0.7, dashArray: "6 8" }).addTo(map);
+
+  if (firstFit) { map.setView([lat, lng], 16); firstFit = false; }
+}
+
+document.querySelector(".actions").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-cmd]");
+  if (!btn) return;
+  const cmd = btn.dataset.cmd;
+  if (cmd === "VOL" && !confirm("Déclarer ce téléphone volé ? Il enverra sa position toutes les minutes et sera signalé volé dans le registre IMEI.")) return;
+  btn.disabled = true;
+  try {
+    await api("POST", `/api/devices/${current}/command`, { type: cmd });
+    toast({ VOL: "Vol déclaré", STOP: "Mode vol désactivé", ALARM: "Sirène demandée", LOCK: "Verrouillage demandé", LOCATE: "Position demandée" }[cmd]);
+    refresh();
+  } catch (err) { toast(err.message); }
+  finally { btn.disabled = false; }
+});
+
+$("btn-contacts").addEventListener("click", (e) => { if (e.currentTarget.getAttribute("aria-disabled")) e.preventDefault(); });
+
+start();
+</script>
+</body>
+</html>
